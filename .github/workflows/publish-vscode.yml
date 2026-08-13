@@ -35,10 +35,12 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      APP_ID: ${{ secrets.GH_APP_ID }}
     steps:
       - name: App token
         id: app-token
-        if: ${{ secrets.GH_APP_ID != '' }}
+        if: env.APP_ID != ''
         uses: tibdex/github-app-token@v2
         with:
           app_id: ${{ secrets.GH_APP_ID }}

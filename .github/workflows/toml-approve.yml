@@ -9,10 +9,14 @@ jobs:
       github.event.issue.pull_request &&
       contains(github.event.comment.body, vars.TOML_APPROVE_PHRASE)
     runs-on: ubuntu-latest
+    env:
+      APP_ID: ${{ secrets.GH_APP_ID }}
+      APP_INSTALLATION_ID: ${{ secrets.GH_APP_INSTALLATION_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
     steps:
       - name: Generate GitHub App token
         id: app-token
-        if: secrets.GH_APP_ID != '' && secrets.GH_APP_INSTALLATION_ID != '' && secrets.GH_APP_PRIVATE_KEY != ''
+        if: env.APP_ID != '' && env.APP_INSTALLATION_ID != '' && env.APP_PRIVATE_KEY != ''
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.GH_APP_ID }}

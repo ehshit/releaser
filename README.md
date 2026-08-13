@@ -1,4 +1,8 @@
 # Eh's Releaser
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+![Issues](https://img.shields.io/github/issues/ehshit/releaser?style=flat&color=orange)
+![GitHub Pull Requests](https://img.shields.io/github/issues-pr/ehshit/releaser)
+
 Repo used for releasing multi-projects all in one for your needs all by being automated, so you really don't have to
 
 it uses its own `.toml` file to know what to do, linked via a `meta.toml` file 
