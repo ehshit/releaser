@@ -89,7 +89,7 @@ After you done that, and the bot is invited, you must add this to your Secrets a
 - `JB_TOKEN` your [JetBrains Token](https://plugins.jetbrains.com/author/me/tokens)
 
 ### Variables
-- `ALLOWED_USER` comma-separated list of users that can approve the bot to operate (using `<@botname> yes`)
+- `ALLOWED_USER` JSON array of users that can approve the bot to operate (using `<@botname> yes`), (Example is `["name1", "name2"]`)
 - `APPROVE_PHRASE` and `TOML_APPROVE_PHRASE` being the exact wording used to approve the request and run the workflows to check those
 - `ORG_NAME` The name of your organization by its url (Example `ehshit`), only if being on an organization
 - `KOMAC_FORK` repo to your WinGet Manifests repo (if it publishes stuff to winget)

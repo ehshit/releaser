@@ -7,7 +7,7 @@ jobs:
   approve:
     if: >
       github.event.issue.pull_request &&
-      contains(fromJSON(format('["{0}"]', replace(vars.ALLOWED_USER, ',', '","'))), github.event.comment.user.login) &&
+      contains(fromJSON(vars.ALLOWED_USER || '[]'), github.event.comment.user.login) &&
       contains(github.event.comment.body, vars.APPROVE_PHRASE)
     runs-on: ubuntu-latest
     steps:
