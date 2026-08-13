@@ -226,6 +226,7 @@ impl Api {
 
     pub fn poll_run(&self, owner: &str, repo: &str, run_id: i64, timeout: Duration) -> Result<WorkflowRun> {
         let deadline = std::time::Instant::now() + timeout;
+        let mut delay = Duration::from_secs(2);
         loop {
             let run: WorkflowRun =
                 self.get_json(&format!("/repos/{owner}/{repo}/actions/runs/{run_id}"))?;
@@ -235,7 +236,8 @@ impl Api {
             if std::time::Instant::now() > deadline {
                 anyhow::bail!("workflow run {run_id} did not finish in time");
             }
-            std::thread::sleep(Duration::from_secs(10));
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(Duration::from_secs(60));
         }
     }
 

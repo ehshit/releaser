@@ -80,6 +80,11 @@ fn main() -> Result<()> {
 
     let blocks = changelog::extract_blocks(pr.body.as_deref().unwrap_or(""));
     log::info!("{} changelog block(s) found", blocks.len());
+    for (id, _) in &blocks {
+        if !targets.iter().any(|(_, p)| p.id == *id) {
+            log::warn!("changelog block <<releases_{id}>> does not match any project id");
+        }
+    }
 
     let mut results = Vec::new();
     for (_, project) in &targets {
@@ -291,6 +296,7 @@ fn render_pr_body(cli: &Cli, project: &config::Project, release_url: Option<&str
 
 fn wait_for_release(api: &github::Api, owner: &str, name: &str, tag: &str) -> Result<String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(900);
+    let mut delay = Duration::from_secs(2);
     loop {
         if let Some(rel) = api.get_release_by_tag(owner, name, tag)? {
             return Ok(rel.html_url);
@@ -298,7 +304,8 @@ fn wait_for_release(api: &github::Api, owner: &str, name: &str, tag: &str) -> Re
         if std::time::Instant::now() > deadline {
             anyhow::bail!("release {tag} never appeared for {owner}/{name}");
         }
-        std::thread::sleep(Duration::from_secs(10));
+        std::thread::sleep(delay);
+        delay = (delay * 2).min(Duration::from_secs(60));
     }
 }
 

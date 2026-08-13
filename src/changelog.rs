@@ -8,7 +8,7 @@ pub struct ReleaseBlock {
 
 pub fn extract_blocks(pr_body: &str) -> Vec<(String, ReleaseBlock)> {
     let mut out = Vec::new();
-    let marker = Regex::new(r"(?m)^<<releases-([A-Za-z0-9_-]+)>>\s*$").unwrap();
+    let marker = Regex::new(r"(?m)^<<releases[-_]([A-Za-z0-9_-]+)>>\s*$").unwrap();
     let fence = Regex::new(r"(?ms)^```[^\n]*\n(.*?)^```").unwrap();
 
     let mut pos = 0;
@@ -126,6 +126,14 @@ mod tests {
         assert_eq!(blocks[0].1.version, "1.0.5");
         assert!(blocks[0].1.section.contains("color pink"));
         assert_eq!(blocks[1].0, "zed");
+    }
+
+    #[test]
+    fn extracts_underscore_marker() {
+        let input = "stuff\n\n<<releases_vscode>>\n```\n# [1.0.5]\n\n- pink\n```\n";
+        let blocks = extract_blocks(input);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].0, "vscode");
     }
 
     #[test]
