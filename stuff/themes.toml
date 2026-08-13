@@ -1,0 +1,37 @@
+[[project]]
+id = "vscode"
+repo = "ehshit/EhWebThemesVSCode"
+branch = "main"
+version = "1.0.4"
+version_files = [
+    { path = "package.json", field = "version", kind = "json" },
+]
+changelog_file = "CHANGELOG.md"
+publish_workflow = "publish-vscode.yml"
+github_release = true
+release_assets = ["*.vsix"]
+
+[[project]]
+id = "jetbrains"
+repo = "ehshit/EhWebThemesIDEA"
+branch = "main"
+version = "1.0"
+version_files = [
+    { path = "resources/META-INF/plugin.xml", field = "version", kind = "xml" },
+]
+publish_workflow = "publish-jetbrains.yml"
+github_release = true
+release_assets = ["*.jar"]
+
+[[project]]
+id = "zed"
+repo = "ehshit/EhWebThemesZed"
+extension_name = "eh-web-themes"
+branch = "master"
+version = "1.0"
+version_files = [
+    { path = "extension.toml", field = "version", kind = "toml" },
+]
+publish_workflow = "publish-zed.yml"
+pr = true
+pr_template = "templates/release.md"

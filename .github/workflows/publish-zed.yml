@@ -1,0 +1,75 @@
+name: Publish Zed
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        required: true
+        type: string
+      repo:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      branch:
+        required: true
+        type: string
+      pr_number:
+        required: false
+        type: string
+      meta_repo:
+        required: false
+        type: string
+      github_release:
+        required: false
+        type: boolean
+        default: false
+      release_assets:
+        required: false
+        type: string
+        default: ""
+      extension_name:
+        required: false
+        type: string
+        default: eh-web-themes
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout meta repo
+        uses: actions/checkout@v4
+      - name: Sync extensions fork
+        if: vars.ZEDEX_FORK != ''
+        env:
+          GH_TOKEN: ${{ secrets.HU_GH_TOKEN }}
+        run: |
+          FORK="${{ vars.ZEDEX_FORK }}"
+          BRANCH="$(gh repo view "$FORK" --json defaultBranchRef --jq .defaultBranchRef.name)"
+          gh api -X POST "repos/$FORK/merge-upstream" -f "branch=$BRANCH"
+      - name: Update registry
+        id: registry
+        uses: huacnlee/zed-extension-action@v2
+        with:
+          extension-name: ${{ inputs.extension_name }}
+          push-to: ${{ vars.ZEDEX_FORK }}
+          tag: ${{ inputs.tag }}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HU_GH_TOKEN }}
+      - name: Edit registry PR body
+        if: steps.registry.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ secrets.HU_GH_TOKEN }}
+        run: |
+          PR="${{ steps.registry.outputs.pull-request-number }}"
+          BODY="$(cat templates/release.md)"
+          BODY="${BODY//<github_workflow_file>/publish-zed.yml}"
+          BODY="${BODY//<repo>/${{ inputs.repo }}}"
+          BODY="${BODY//<pr_number>/$PR}"
+          BODY="${BODY//<version>/${{ inputs.version }}}"
+          BODY="$(printf '%s' "$BODY" | awk '/\{if\.projectHasReleaseLogs\}/{skip=1} !skip{print} /\{endif\}/{skip=0}')"
+          printf '%s' "$BODY" > /tmp/pr_body.md
+          gh pr edit "$PR" --repo "zed-industries/extensions" --body-file /tmp/pr_body.md

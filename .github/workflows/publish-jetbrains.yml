@@ -1,0 +1,120 @@
+name: Publish JetBrains
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        required: true
+        type: string
+      repo:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      branch:
+        required: true
+        type: string
+      pr_number:
+        required: false
+        type: string
+      meta_repo:
+        required: false
+        type: string
+      github_release:
+        required: false
+        type: boolean
+        default: false
+      release_assets:
+        required: false
+        type: string
+        default: ""
+      plugin_xml_id:
+        required: false
+        type: string
+        default: EhWebThemes
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: App token
+        id: app-token
+        if: ${{ secrets.GH_APP_ID != '' }}
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          installation_id: ${{ secrets.GH_APP_INSTALLATION_ID }}
+      - name: Resolve token
+        id: token
+        run: echo "token=${{ steps.app-token.outputs.token || secrets.GH_PAT }}" >> "$GITHUB_OUTPUT"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.tag }}
+          token: ${{ steps.token.outputs.token }}
+      - name: Setup Java
+        if: hashFiles('gradlew') != ''
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Build plugin
+        if: hashFiles('gradlew') != ''
+        run: |
+          chmod +x gradlew
+          ./gradlew buildPlugin --no-daemon
+      - name: Package fallback
+        if: hashFiles('gradlew') == ''
+        run: |
+          rm -rf .dist plugin.zip
+          mkdir -p .dist
+          git ls-files | while read -r f; do
+            mkdir -p ".dist/$(dirname "$f")"
+            cp "$f" ".dist/$f"
+          done
+          (cd .dist/resources && zip -r ../../plugin.zip .)
+          rm -rf .dist
+      - name: Locate archive
+        id: archive
+        run: |
+          if [ -f "plugin.zip" ]; then
+            ARCHIVE="plugin.zip"
+          elif ls build/distributions/*.zip >/dev/null 2>&1; then
+            ARCHIVE=$(ls build/distributions/*.zip | head -1)
+          else
+            ARCHIVE=$(ls *.zip 2>/dev/null | head -1)
+          fi
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+      - name: Publish to JetBrains Marketplace
+        uses: CodingWithCalvin/GHA-JBMarketplacePublisher@v1
+        with:
+          marketplace-pat: ${{ secrets.JB_TOKEN }}
+          archive-path: ${{ steps.archive.outputs.archive }}
+          plugin-xml-id: ${{ inputs.plugin_xml_id }}
+      - name: GitHub Release
+        if: inputs.github_release
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ARCHIVE: ${{ steps.archive.outputs.archive }}
+          ASSETS: ${{ inputs.release_assets }}
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            --repo "${{ inputs.repo }}" \
+            --title "${{ inputs.tag }}" \
+            --generate-notes
+          if [ -n "$ARCHIVE" ]; then
+            gh release upload "${{ inputs.tag }}" "$ARCHIVE" --repo "${{ inputs.repo }}" --clobber
+          fi
+          IFS=',' read -r -a patterns <<< "$ASSETS"
+          for p in "${patterns[@]}"; do
+            for f in $p; do
+              if [ -f "$f" ]; then
+                gh release upload "${{ inputs.tag }}" "$f" --repo "${{ inputs.repo }}" --clobber
+              fi
+            done
+          done

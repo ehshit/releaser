@@ -1,0 +1,19 @@
+# Example file for a desktop app
+[[project]]
+id = "desktop-app"
+repo = "your-org/desktop-app"
+branch = "main"
+version = "1.0.0"
+version_files = [
+    { path = "Cargo.toml", field = "version", kind = "toml" },
+]
+changelog_file = "CHANGELOG.md" # ChangeLog File to push to
+publish_workflow = "publish-komac.yml"
+github_release = true
+release_assets = ["target/release/*.exe"] # This needs the exact path to your compiled executable where it will release it!
+
+# You can as well publish to komac using the example below
+[project.komac]
+manifest_repo = "your-org/winget-pkgs"
+package = "YourOrg.DesktopApp"
+url_template = "https://github.com/your-org/desktop-app/releases/download/v{version}/desktop-app-{version}.exe"

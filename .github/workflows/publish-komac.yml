@@ -1,0 +1,94 @@
+name: Publish Komac
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        required: true
+        type: string
+      repo:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      branch:
+        required: true
+        type: string
+      pr_number:
+        required: false
+        type: string
+      meta_repo:
+        required: false
+        type: string
+      github_release:
+        required: false
+        type: boolean
+        default: false
+      release_assets:
+        required: false
+        type: string
+        default: ""
+      komac_manifest_repo:
+        required: false
+        type: string
+        default: ""
+      komac_package:
+        required: false
+        type: string
+        default: ""
+      komac_version:
+        required: false
+        type: string
+        default: ""
+      komac_url:
+        required: false
+        type: string
+        default: ""
+      komac_url_template:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: inputs.komac_manifest_repo != '' && inputs.komac_package != ''
+    steps:
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install komac
+        run: cargo install komac --locked --root .
+      - name: Sync manifest repo fork
+        if: vars.KOMAC_FORK != ''
+        env:
+          GH_TOKEN: ${{ secrets.HU_GH_TOKEN }}
+        run: |
+          FORK="${{ vars.KOMAC_FORK }}"
+          BRANCH="$(gh repo view "$FORK" --json defaultBranchRef --jq .defaultBranchRef.name)"
+          gh api -X POST "repos/$FORK/merge-upstream" -f "branch=$BRANCH"
+      - name: Resolve download URL
+        id: url
+        run: |
+          VER="${{ inputs.komac_version || inputs.version }}"
+          if [ -n "${{ inputs.komac_url }}" ]; then
+            U="${{ inputs.komac_url }}"
+            U="${U//\{version\}/$VER}"
+          else
+            U="${{ inputs.komac_url_template }}"
+            U="${U//\{version\}/$VER}"
+          fi
+          echo "url=$U" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+      - name: Update manifest
+        env:
+          HU_GH_TOKEN: ${{ secrets.HU_GH_TOKEN }}
+        run: |
+          ./bin/komac update \
+            --package "${{ inputs.komac_package }}" \
+            --version "${{ steps.url.outputs.version }}" \
+            --url "${{ steps.url.outputs.url }}" \
+            --token "$HU_GH_TOKEN" \
+            --manifest-repo "${{ inputs.komac_manifest_repo }}"

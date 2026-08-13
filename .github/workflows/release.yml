@@ -1,0 +1,45 @@
+name: Release
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: number
+      branch:
+        required: false
+        type: string
+        default: main
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      branch:
+        required: false
+        type: string
+        default: main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --locked
+      - name: Run bot
+        env:
+          GH_APP_ID: ${{ secrets.GH_APP_ID }}
+          GH_APP_INSTALLATION_ID: ${{ secrets.GH_APP_INSTALLATION_ID }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          RUST_LOG: info
+        run: |
+          ./target/release/ehrelease \
+            --repo "${{ github.repository }}" \
+            --branch "${{ inputs.branch }}" \
+            --pr "${{ inputs.pr_number }}"

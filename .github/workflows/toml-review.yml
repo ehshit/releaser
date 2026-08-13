@@ -1,0 +1,199 @@
+name: Toml Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        if: secrets.GH_APP_ID != '' && secrets.GH_APP_INSTALLATION_ID != '' && secrets.GH_APP_PRIVATE_KEY != ''
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          installation-id: ${{ secrets.GH_APP_INSTALLATION_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - name: Resolve bot token
+        id: token
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -n "$APP_TOKEN" ]; then
+            echo "token=$APP_TOKEN" >> "$GITHUB_OUTPUT"
+          else
+            echo "token=$GH_PAT" >> "$GITHUB_OUTPUT"
+            echo "::warning::⚠️ Using a GitHub PAT might make it less-safe because it behaves on the bot's account, and it's subject to it's TOS and being compromised (for whatever reason), you can at any moment move to a Github APP to make it safe as it is"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Changed toml files
+        id: changed
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          FILES="$(git diff --name-only "$BASE"..."$HEAD" -- '*.toml' || true)"
+          echo "count=$(printf '%s\n' "$FILES" | grep -c . || true)" >> "$GITHUB_OUTPUT"
+
+      - name: Repo access check
+        id: member
+        if: steps.changed.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.repository }}"
+          USER="${{ github.event.pull_request.user.login }}"
+          ORG="${{ vars.ORG_NAME }}"
+          if [ "$USER" = "$OWNER" ]; then
+            echo "is_member=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$ORG" ] && gh api "orgs/$ORG/members/$USER" --silent >/dev/null 2>&1; then
+            echo "is_member=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PERM="$(gh api "repos/$REPO/collaborators/$USER/permission" --jq .permission 2>/dev/null || echo none)"
+          if [ "$PERM" = "admin" ] || [ "$PERM" = "write" ]; then
+            echo "is_member=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "is_member=false" >> "$GITHUB_OUTPUT"
+
+      - name: Clear toml labels (no toml changes)
+        if: steps.changed.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          gh pr edit "$PR" --repo "$REPO" --remove-label "toml changes" || true
+          gh pr edit "$PR" --repo "$REPO" --remove-label "toml changes pending" || true
+
+      - name: Label member toml PR
+        if: steps.changed.outputs.count != '0' && steps.member.outputs.is_member == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          gh pr edit "$PR" --repo "$REPO" --add-label "toml changes"
+          gh pr edit "$PR" --repo "$REPO" --remove-label "toml changes pending" || true
+
+      - name: Label non-member toml PR
+        if: steps.changed.outputs.count != '0' && steps.member.outputs.is_member == 'false'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          gh pr edit "$PR" --repo "$REPO" --add-label "toml changes pending"
+          gh pr edit "$PR" --repo "$REPO" --remove-label "toml changes" || true
+
+      - name: Comment check started (member)
+        id: check-comment
+        if: steps.changed.outputs.count != '0' && steps.member.outputs.is_member == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          printf '%s\n' \
+            'Checking TOML Syntax of this PR, give me a minute...' \
+            '' \
+            'Status: Pending' > /tmp/check-body.md
+          jq -Rs '{body: .}' /tmp/check-body.md > /tmp/payload.json
+          ID="$(gh api --method POST "repos/$REPO/issues/$PR/comments" --input /tmp/payload.json --jq .id)"
+          echo "comment_id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: TOML syntax check (member)
+        id: syntax
+        if: steps.changed.outputs.count != '0' && steps.member.outputs.is_member == 'true'
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          OK=true
+          FILES="$(git diff --name-only "$BASE"..."$HEAD" -- '*.toml' || true)"
+          for f in $FILES; do
+            if ! git show "$HEAD:$f" | python3 -c 'import tomllib,sys; tomllib.load(sys.stdin.buffer)' 2>/dev/null; then
+              OK=false
+            fi
+          done
+          echo "ok=$OK" >> "$GITHUB_OUTPUT"
+
+      - name: Detect new versions (member)
+        id: new-version
+        if: steps.changed.outputs.count != '0' && steps.member.outputs.is_member == 'true'
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          NEW=false
+          FILES="$(git diff --name-only "$BASE"..."$HEAD" -- '*.toml' || true)"
+          for f in $FILES; do
+            base_v="$(git show "$BASE:$f" 2>/dev/null | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' | sort)"
+            head_v="$(git show "$HEAD:$f" 2>/dev/null | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' | sort)"
+            if [ "$base_v" != "$head_v" ]; then
+              NEW=true
+            fi
+          done
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Label New Versions (member)
+        if: steps.new-version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          gh pr edit "$PR" --repo "$REPO" --add-label "New Versions"
+
+      - name: Update check comment (member)
+        if: steps.changed.outputs.count != '0' && steps.member.outputs.is_member == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          CID="${{ steps.check-comment.outputs.comment_id }}"
+          if [ "${{ steps.syntax.outputs.ok }}" == "true" ]; then
+            STATUS="Complete"
+          else
+            STATUS="Fail"
+          fi
+          printf '%s\n' \
+            'Checking TOML Syntax of this PR, give me a minute...' \
+            '' \
+            "Status: $STATUS" > /tmp/check-body.md
+          jq -Rs '{body: .}' /tmp/check-body.md > /tmp/payload.json
+          gh api --method PATCH "repos/$REPO/issues/comments/$CID" --input /tmp/payload.json
+
+      - name: Comment publish prompt (member)
+        if: steps.new-version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          printf '%s\n' \
+            'Can publish the versions of those `.toml` files right now, for that run `@ehreleaser yes`' \
+            > /tmp/publish-body.md
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/publish-body.md || true
+
+      - name: Comment approval needed (non-member)
+        if: steps.changed.outputs.count != '0' && steps.member.outputs.is_member == 'false'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          printf '%s\n' \
+            'It seems this PR contains .toml changes or new versions, but you are not a member of the organization to run that, an member of this organization must need to run `@ehreleaser approve` to approve it to run' \
+            > /tmp/approve-body.md
+          gh pr comment "$PR" --repo "$REPO" --body-file /tmp/approve-body.md || true

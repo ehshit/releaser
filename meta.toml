@@ -1,0 +1,6 @@
+bot_name = "ehreleaser"
+approve_phrase = "yes"
+
+categories = [
+    "stuff/themes.toml",
+]

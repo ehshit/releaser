@@ -1,0 +1,9 @@
+bot_name = "release-bot"
+approve_phrase = "yes"
+
+# Appending directories is via `path/file.toml`
+# You can allow multiple files at once as well
+categories = [
+    "themes.toml",
+    "stuff/apps.toml",
+]

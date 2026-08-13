@@ -1,0 +1,85 @@
+name: Publish VSCode
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        required: true
+        type: string
+      repo:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      branch:
+        required: true
+        type: string
+      pr_number:
+        required: false
+        type: string
+      meta_repo:
+        required: false
+        type: string
+      github_release:
+        required: false
+        type: boolean
+        default: false
+      release_assets:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: App token
+        id: app-token
+        if: ${{ secrets.GH_APP_ID != '' }}
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          installation_id: ${{ secrets.GH_APP_INSTALLATION_ID }}
+      - name: Resolve token
+        id: token
+        run: echo "token=${{ steps.app-token.outputs.token || secrets.GH_PAT }}" >> "$GITHUB_OUTPUT"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.tag }}
+          token: ${{ steps.token.outputs.token }}
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Package
+        run: |
+          npm install --no-audit --no-fund
+          npx --yes @vscode/vsce package -o theme.vsix
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx publish theme.vsix -p "$OVSX_PAT"
+      - name: GitHub Release
+        if: inputs.github_release
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ASSETS: ${{ inputs.release_assets }}
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            --repo "${{ inputs.repo }}" \
+            --title "${{ inputs.tag }}" \
+            --generate-notes
+          IFS=',' read -r -a patterns <<< "$ASSETS"
+          for p in "${patterns[@]}"; do
+            for f in $p; do
+              if [ -f "$f" ]; then
+                gh release upload "${{ inputs.tag }}" "$f" --repo "${{ inputs.repo }}" --clobber
+              fi
+            done
+          done

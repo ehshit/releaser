@@ -1,0 +1,135 @@
+name: Toml Approve
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  approve:
+    if: >
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, vars.TOML_APPROVE_PHRASE)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        if: secrets.GH_APP_ID != '' && secrets.GH_APP_INSTALLATION_ID != '' && secrets.GH_APP_PRIVATE_KEY != ''
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          installation-id: ${{ secrets.GH_APP_INSTALLATION_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - name: Resolve bot token
+        id: token
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -n "$APP_TOKEN" ]; then
+            echo "token=$APP_TOKEN" >> "$GITHUB_OUTPUT"
+          else
+            echo "token=$GH_PAT" >> "$GITHUB_OUTPUT"
+            echo "::warning::⚠️ Using a GitHub PAT might make it less-safe because it behaves on the bot's account, and it's subject to it's TOS and being compromised (for whatever reason), you can at any moment move to a Github APP to make it safe as it is"
+          fi
+
+      - name: Check pending label
+        id: pending
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.issue.number }}"
+          REPO="${{ github.repository }}"
+          LABELS="$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
+          if echo "$LABELS" | grep -q "toml changes pending"; then
+            echo "is_pending=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_pending=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Repo access check
+        id: member
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.repository }}"
+          USER="${{ github.event.comment.user.login }}"
+          ORG="${{ vars.ORG_NAME }}"
+          if [ "$USER" = "$OWNER" ]; then
+            echo "is_member=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$ORG" ] && gh api "orgs/$ORG/members/$USER" --silent >/dev/null 2>&1; then
+            echo "is_member=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PERM="$(gh api "repos/$REPO/collaborators/$USER/permission" --jq .permission 2>/dev/null || echo none)"
+          if [ "$PERM" = "admin" ] || [ "$PERM" = "write" ]; then
+            echo "is_member=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "is_member=false" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.pending.outputs.is_pending == 'true' && steps.member.outputs.is_member == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TOML syntax check
+        id: syntax
+        if: steps.pending.outputs.is_pending == 'true' && steps.member.outputs.is_member == 'true'
+        run: |
+          PR="${{ github.event.issue.number }}"
+          REPO="${{ github.repository }}"
+          BASE="$(gh pr view "$PR" --repo "$REPO" --json baseRefOid --jq .baseRefOid)"
+          git fetch origin "refs/pull/$PR/head:pr-head"
+          OK=true
+          FILES="$(git diff --name-only "$BASE"...pr-head -- '*.toml' || true)"
+          for f in $FILES; do
+            if ! git show pr-head:$f | python3 -c 'import tomllib,sys; tomllib.load(sys.stdin.buffer)' 2>/dev/null; then
+              OK=false
+            fi
+          done
+          echo "ok=$OK" >> "$GITHUB_OUTPUT"
+
+      - name: Detect new versions
+        id: new-version
+        if: steps.pending.outputs.is_pending == 'true' && steps.member.outputs.is_member == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.issue.number }}"
+          REPO="${{ github.repository }}"
+          BASE="$(gh pr view "$PR" --repo "$REPO" --json baseRefOid --jq .baseRefOid)"
+          git fetch origin "refs/pull/$PR/head:pr-head"
+          NEW=false
+          FILES="$(git diff --name-only "$BASE"...pr-head -- '*.toml' || true)"
+          for f in $FILES; do
+            base_v="$(git show "$BASE:$f" 2>/dev/null | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' | sort)"
+            head_v="$(git show pr-head:$f 2>/dev/null | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' | sort)"
+            if [ "$base_v" != "$head_v" ]; then
+              NEW=true
+            fi
+          done
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Approve run
+        if: steps.pending.outputs.is_pending == 'true' && steps.member.outputs.is_member == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          PR="${{ github.event.issue.number }}"
+          REPO="${{ github.repository }}"
+          gh pr edit "$PR" --repo "$REPO" --add-label "toml changes"
+          gh pr edit "$PR" --repo "$REPO" --remove-label "toml changes pending" || true
+          if [ "${{ steps.syntax.outputs.ok }}" != "true" ]; then
+            gh pr comment "$PR" --repo "$REPO" --body 'TOML syntax check failed, cannot publish' || true
+          fi
+          if [ "${{ steps.new-version.outputs.new }}" == "true" ]; then
+            gh pr edit "$PR" --repo "$REPO" --add-label "New Versions"
+            printf '%s\n' \
+              'Can publish the versions of those `.toml` files right now, for that run `@ehreleaser yes`' \
+              > /tmp/publish-body.md
+            gh pr comment "$PR" --repo "$REPO" --body-file /tmp/publish-body.md || true
+          fi
