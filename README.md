@@ -81,8 +81,8 @@ After you done that, and the bot is invited, you must add this to your Secrets a
 - `GH_APP_ID` GitHub App ID when creating your app
 - `GH_APP_INSTALLATION_ID` The ID of the installation after it's installed to your account or organization
 - `GH_APP_PRIVATE_KEY` The contents of the .pem key that you generated
-- `OVSX_PAT` [Open VSX token](https://open-vsx.org/user-settings/tokens)
-- `JB_TOKEN` [JetBrains Token](https://plugins.jetbrains.com/author/me/tokens)
+- `OVSX_PAT` your [Open VSX token](https://open-vsx.org/user-settings/tokens)
+- `JB_TOKEN` your [JetBrains Token](https://plugins.jetbrains.com/author/me/tokens)
 
 ### Variables
 - `ALLOWED_USER` comma-separated list of users that can approve the bot to operate (using `<@botname> yes`)
