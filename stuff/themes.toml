@@ -28,7 +28,7 @@ id = "zed"
 repo = "ehshit/EhWebThemesZed"
 extension_name = "eh-web-themes"
 branch = "master"
-version = "1.0"
+version = "1.0.0"
 version_files = [
     { path = "extension.toml", field = "version", kind = "toml" },
 ]
